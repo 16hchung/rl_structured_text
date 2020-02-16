@@ -11,7 +11,9 @@ import data
 import model
 
 parser = argparse.ArgumentParser(description='PyTorch Wikitext-2 RNN/LSTM Language Model')
-parser.add_argument('--data', type=str, default='./data/wikitext-2',
+parser.add_argument('--train_data', type=str, default='../data/filtered',
+                    help='location of the data corpus')
+parser.add_argument('--corpus_data', type=str, default='./data/wikitext-2',
                     help='location of the data corpus')
 parser.add_argument('--model', type=str, default='LSTM',
                     help='type of recurrent net (RNN_TANH, RNN_RELU, LSTM, GRU, Transformer)')
@@ -19,7 +21,7 @@ parser.add_argument('--emsize', type=int, default=200,
                     help='size of word embeddings')
 parser.add_argument('--nhid', type=int, default=200,
                     help='number of hidden units per layer')
-parser.add_argument('--nlayers', type=int, default=2,
+parser.add_argument('--nlayers', type=int, default=3,
                     help='number of layers')
 parser.add_argument('--lr', type=float, default=20,
                     help='initial learning rate')
@@ -41,7 +43,7 @@ parser.add_argument('--cuda', action='store_true',
                     help='use CUDA')
 parser.add_argument('--log-interval', type=int, default=200, metavar='N',
                     help='report interval')
-parser.add_argument('--save', type=str, default='model.pt',
+parser.add_argument('--save', type=str, default='3layers_model.pt',
                     help='path to save the final model')
 parser.add_argument('--onnx-export', type=str, default='',
                     help='path to export the final model in onnx format')
@@ -63,8 +65,8 @@ device = torch.device("cuda" if args.cuda else "cpu")
 # Load data
 ###############################################################################
 
-corpus = data.Corpus(args.data)
-
+corpus = data.Corpus(args.corpus_data)
+our_data = data.Corpus(args.train_data, corpus.dictionary)
 # Starting from sequential data, batchify arranges the dataset into columns.
 # For instance, with the alphabet as the sequence and batch size 4, we'd get
 # ┌ a g m s ┐
@@ -87,9 +89,14 @@ def batchify(data, bsz):
     return data.to(device)
 
 eval_batch_size = 10
-train_data = batchify(corpus.train, args.batch_size)
-val_data = batchify(corpus.valid, eval_batch_size)
-test_data = batchify(corpus.test, eval_batch_size)
+train_data = batchify(our_data.train, args.batch_size)
+val_data = batchify(our_data.valid, eval_batch_size)
+test_data = batchify(our_data.test, eval_batch_size)
+
+sample_train = batchify(corpus.train, args.batch_size)
+sample_val = batchify(corpus.valid, args.batch_size)
+sample_test = batchify(corpus.test, args.batch_size)
+
 
 ###############################################################################
 # Build the model
@@ -99,7 +106,8 @@ ntokens = len(corpus.dictionary)
 if args.model == 'Transformer':
     model = model.TransformerModel(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device)
 else:
-    model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied).to(device)
+    model = torch.load('model.pt')
+    #model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied).to(device)
 
 criterion = nn.CrossEntropyLoss()
 
@@ -155,6 +163,7 @@ def evaluate(data_source):
 
 def train():
     # Turn on training mode which enables dropout.
+    # TODO: debug model.train()
     model.train()
     total_loss = 0.
     start_time = time.time()
