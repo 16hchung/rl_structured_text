@@ -43,7 +43,7 @@ parser.add_argument('--cuda', action='store_true',
                     help='use CUDA')
 parser.add_argument('--log-interval', type=int, default=200, metavar='N',
                     help='report interval')
-parser.add_argument('--save', type=str, default='3layers_model.pt',
+parser.add_argument('--save', type=str, default='OurModel.pt',
                     help='path to save the final model')
 parser.add_argument('--onnx-export', type=str, default='',
                     help='path to export the final model in onnx format')
@@ -65,6 +65,7 @@ device = torch.device("cuda" if args.cuda else "cpu")
 # Load data
 ###############################################################################
 
+combined_corpus = data.Corpus()
 corpus = data.Corpus(args.corpus_data)
 our_data = data.Corpus(args.train_data, corpus.dictionary)
 # Starting from sequential data, batchify arranges the dataset into columns.
@@ -93,9 +94,9 @@ train_data = batchify(our_data.train, args.batch_size)
 val_data = batchify(our_data.valid, eval_batch_size)
 test_data = batchify(our_data.test, eval_batch_size)
 
-sample_train = batchify(corpus.train, args.batch_size)
-sample_val = batchify(corpus.valid, args.batch_size)
-sample_test = batchify(corpus.test, args.batch_size)
+#sample_train = batchify(corpus.train, args.batch_size)
+#sample_val = batchify(corpus.valid, args.batch_size)
+#sample_test = batchify(corpus.test, args.batch_size)
 
 
 ###############################################################################
@@ -106,8 +107,8 @@ ntokens = len(corpus.dictionary)
 if args.model == 'Transformer':
     model = model.TransformerModel(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device)
 else:
-    model = torch.load('model.pt')
-    #model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied).to(device)
+    #model = torch.load('model.pt').to(device)
+    model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied).to(device)
 
 criterion = nn.CrossEntropyLoss()
 
