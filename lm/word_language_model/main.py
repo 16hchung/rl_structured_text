@@ -6,12 +6,12 @@ import os
 import torch
 import torch.nn as nn
 import torch.onnx
-
+import pickle
 import data
 import model
 
 parser = argparse.ArgumentParser(description='PyTorch Wikitext-2 RNN/LSTM Language Model')
-parser.add_argument('--train_data', type=str, default='../data/filtered',
+parser.add_argument('--train_data', type=str, default='./data/OurData/filtered',
                     help='location of the data corpus')
 parser.add_argument('--corpus_data', type=str, default='./data/wikitext-2',
                     help='location of the data corpus')
@@ -47,9 +47,9 @@ parser.add_argument('--save', type=str, default='OurModel.pt',
                     help='path to save the final model')
 parser.add_argument('--onnx-export', type=str, default='',
                     help='path to export the final model in onnx format')
-
 parser.add_argument('--nhead', type=int, default=2,
                     help='the number of heads in the encoder/decoder of the transformer model')
+parser.add_argument('--function', type=str, default='generate', help='choose between generate, pretrain, transfer')
 
 args = parser.parse_args()
 
@@ -64,10 +64,16 @@ device = torch.device("cuda" if args.cuda else "cpu")
 ###############################################################################
 # Load data
 ###############################################################################
-
-combined_corpus = data.Corpus()
-corpus = data.Corpus(args.corpus_data)
-our_data = data.Corpus(args.train_data, corpus.dictionary)
+if args.function == 'generate':
+	corpus = data.Corpus('./data/Corpus')
+	pickle.dump(corpus.dictionary, open('dictionary.p', 'wb'))
+	exit(0)
+if args.function == 'pretrain':
+	corpus = pickle.load(open('dictionary.p', 'rb'))
+	our_data = data.Corpus(args.corpus_data, corpus)
+if args.function == 'transfer':
+	corpus = pickle.load(open('dictionary.p', 'rb'))
+	our_data = data.Corpus(args.train_data, corpus)
 # Starting from sequential data, batchify arranges the dataset into columns.
 # For instance, with the alphabet as the sequence and batch size 4, we'd get
 # ┌ a g m s ┐
@@ -103,13 +109,14 @@ test_data = batchify(our_data.test, eval_batch_size)
 # Build the model
 ###############################################################################
 
-ntokens = len(corpus.dictionary)
+ntokens = len(our_data.dictionary)
 if args.model == 'Transformer':
     model = model.TransformerModel(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device)
 else:
-    #model = torch.load('model.pt').to(device)
-    model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied).to(device)
-
+    if args.function == 'pretrain':
+        model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied).to(device)
+    else:
+        model = torch.load('OurModel.pt').to(device)
 criterion = nn.CrossEntropyLoss()
 
 ###############################################################################
@@ -146,7 +153,7 @@ def evaluate(data_source):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0.
-    ntokens = len(corpus.dictionary)
+    ntokens = len(our_data.dictionary)
     if args.model != 'Transformer':
         hidden = model.init_hidden(eval_batch_size)
     with torch.no_grad():
@@ -168,7 +175,7 @@ def train():
     model.train()
     total_loss = 0.
     start_time = time.time()
-    ntokens = len(corpus.dictionary)
+    ntokens = len(our_data.dictionary)
     if args.model != 'Transformer':
         hidden = model.init_hidden(args.batch_size)
     for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
