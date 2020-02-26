@@ -67,12 +67,20 @@ with open(args.outf, 'w') as outf:
             else:
                 output, hidden = model(input, hidden)
                 word_weights = output.squeeze().div(args.temperature).exp().cpu()
-                word_idx = torch.multinomial(word_weights, 1)[0]
+                word_idx = torch.multinomial(word_weights, 1)[:5]
+                # TODO: extract top 5 action tokens --> feed thru Q network --> with epsilon pick random of the five, with 1-epsilon, choose the argmax Q
+                # TODO: with epsilon random from [0:5] --> Q(hidden[0], action)
+                # with 1 - eps, Q(hidden[0], 0)
+                # update Q to backprop
+                # input.fill_word(word_idx[0 / random action])
+                # TODO: Q(hidden[0], action one from [0:5]) 
                 input.fill_(word_idx)
 
             word = corpus.dictionary.idx2word[word_idx]
 
             outf.write(word + ('\n' if i % 20 == 19 else ' '))
+
+
 
             if i % args.log_interval == 0:
                 print('| Generated {}/{} words'.format(i, args.words))
