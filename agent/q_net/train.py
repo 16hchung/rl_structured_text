@@ -84,6 +84,6 @@ def gen_episode(outf):
             state_buffer[curr_buff_idx % MAX_BUF,:] = hidden
             reward_buffer[curr_buff_idx % MAX_BUF,:] = reward
             action_buffer[curr_buff_idx % MAX_BUF,:] = action
-            sep = ' ' if word_idx != corpus.dictionary.word2idx[END_TOKEN] else '\n
+            sep = ' ' if word_idx != corpus.dictionary.word2idx[END_TOKEN] else '\n'
 
             outf.write(corpus.dictionary.idx2word[word_idx] + sep)

@@ -3,7 +3,7 @@ import torch.nn
 import torch.nn.functional as F
 
 class QNet(nn.Module):
-    def __init__(self, state_dim=200, action_dim=1):
+    def __init__(self, state_dim=200, action_dim=1): # TODO incorporate device
         super(QNet, self).__init__()
         self.hidden_layers = [300, 150, 50]
         self.state_dim = state_dim
