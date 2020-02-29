@@ -65,6 +65,7 @@ def train(outf):
     qnet = QNet() #TODO: CUDA?
     qnet.to(device)
     qnet.cuda()
+    #qnet.load_state_dict(torch.load(SAVEPATH))
 
     target_qnet = QNet() #TODO: CUDA?
     target_qnet.to(device)
@@ -73,6 +74,7 @@ def train(outf):
     target_qnet.eval()
 
     optimizer = torch.optim.Adam(qnet.parameters(), lr=0.05)
+    #optimizer.load_state_dict(torch.load(SAVEPATH + '.optim'))
     criterion = torch.nn.MSELoss()
     cum_loss = 0
     losses = []
