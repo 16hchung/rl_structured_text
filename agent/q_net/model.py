@@ -1,5 +1,5 @@
 import torch
-import torch.nn
+import torch.nn as nn
 import torch.nn.functional as F
 
 class QNet(nn.Module):
@@ -8,8 +8,6 @@ class QNet(nn.Module):
         self.hidden_layers = [300, 150, 50]
         self.state_dim = state_dim
         self.action_dim = action_dim
-        self.optimizer = torch.optim.Adam(lr=0.05)
-        self.criterion = torch.nn.NLLLoss()
         self.model = nn.Sequential(
                 nn.Linear(self.state_dim + self.action_dim, self.hidden_layers[0], bias=True), 
                 nn.ReLU(),
@@ -21,7 +19,7 @@ class QNet(nn.Module):
         )
 
     def forward(self, hidden, action):
-        input = torch.concat((hidden, action), -1)
+        input = torch.cat((hidden, action), dim=-1)
         output = self.model(input)
         return output
 
