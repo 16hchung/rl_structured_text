@@ -62,7 +62,7 @@ def batch_iter():
     states, actions, rewards = zip(*list_zipped)
     n_batches = min(math.floor(curr_buff_idx / BATCH_SZ), N_BATCHES)
     for i in range(n_batches):
-        yield states[i*BATCH_SZ:(i+1)*BATCH_SZ]), actions[i*BATCH_SZ:(i+1)*BATCH_SZ]), rewards[i*BATCH_SZ:(i+1)*BATCH_SZ])
+        yield states[i*BATCH_SZ:(i+1)*BATCH_SZ]), next_states[i*BATCH_SZ: (i+1)*BATCH_SZ], actions[i*BATCH_SZ:(i+1)*BATCH_SZ]), rewards[i*BATCH_SZ:(i+1)*BATCH_SZ])
 
 eps = .9
 possible_actions = torch.tensor(list(range(N_ACTIONS)))
@@ -73,7 +73,8 @@ with open(fname, 'w') as outf:
             gen_episode(outf)
         qnet.train()
         for states, actions, rewards in batch_iter():
-            Q(states, actions)
+            q_hat = Q(states, actions)
+            target = rewards + torch.max(Q(next_states, possible_actions))
             calculate target using reward buffer
             update loss
             log loss
@@ -83,27 +84,31 @@ with open(fname, 'w') as outf:
 def gen_episode(outf):
     with torch.no_grad(): #TODO replace corpus.dictionary.word2idx
         qnet.eval() # freeze
-        curr_token = torch.randint(ntokens, (1, 1), dtype=torch.long).to(device)
-        curr_hidden = model.init_hidden(1)
-        
+        #curr_token = torch.randint(ntokens, (1, 1), dtype=torch.long).to(device)
+        #curr_hidden = model.init_hidden(1)
+        generated = tokenizer.encode("The Manhattan Bridge")
+        context = torch.tensor([generated])
+        past = None
+       
         # generate trajectory for episode
-        while curr_token.item() != corpus.dictionary.word2idx[END_TOKEN]:
-            output, hidden = lm(curr_token, hidden)
-            import pdb;pdb.set_trace()
-            word_weights = output.squeeze().div(1).exp().cpu()
-            ww_sorted, ww_idcs = torch.sort(word_weights, dim=-1, descending=True)
+        while sequence[-1] != END_TOKEN:
+            output = model(context, past=past)
+            logits = output[0]
+            hiddens = output[2]
+            q_state = hiddens[-1][:,-1,:]
             action = random.randint(0, N_ACTIONS-1)
             if random.random() > eps:
-                q_pred = qnet(hidden.repeat(N_ACTIONS,1), possible_actions)
+                q_pred = qnet(hidden.repeat(N_ACTIONS, 1), possible_actions)
                 action = torch.argmax(q_pred)
-            word_idx = ww_idcs[action]
-            curr_token.fill_(word_idx)
-            reward = torch.softmax(ww_sorted)[action]
-            # update buffer
+            rewards, idx = torch.topk(logits[:,-1,:], k=5,dim=-1)
+            token = idx[action]
+            reward = torch.softmax(rewards)[action]
+            generated += [token.tolist()]
+            context = token.unsqueeze(0)
+            sequence = tokenizer.decode(generated)
             curr_buff_idx += 1
             state_buffer[curr_buff_idx % MAX_BUF,:] = hidden
             reward_buffer[curr_buff_idx % MAX_BUF,:] = reward
             action_buffer[curr_buff_idx % MAX_BUF,:] = action
-            sep = ' ' if word_idx != corpus.dictionary.word2idx[END_TOKEN] else '\n'
-
-            outf.write(corpus.dictionary.idx2word[word_idx] + sep)
+            sep = ' ' if sequence[-1] != END_TOKEN else '\n'
+            outf.write(sequence + sep)
