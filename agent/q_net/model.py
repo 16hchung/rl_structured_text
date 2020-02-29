@@ -3,11 +3,13 @@ import torch.nn
 import torch.nn.functional as F
 
 class QNet(nn.Module):
-    def __init__(self, state_dim=200, action_dim=1): # TODO incorporate device
+    def __init__(self, state_dim=768, action_dim=1): # TODO incorporate device
         super(QNet, self).__init__()
         self.hidden_layers = [300, 150, 50]
         self.state_dim = state_dim
         self.action_dim = action_dim
+        self.optimizer = torch.optim.Adam(lr=0.05)
+        self.criterion = torch.nn.NLLLoss()
         self.model = nn.Sequential(
                 nn.Linear(self.state_dim + self.action_dim, self.hidden_layers[0], bias=True), 
                 nn.ReLU(),
