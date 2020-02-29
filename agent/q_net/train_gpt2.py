@@ -54,15 +54,15 @@ print(sequence)
 qnet = QNet()
 def batch_iter():
     last_idx = min(curr_buff_idx + 1, MAX_BUF)
-    last_state = state_buffer[-1,:]
-    next_state_buffer[:-1,:] = state_buffer[1:,:]
-    next_state_buffer[0,:] = last_state
-    list_zipped = list(zip(state_buffer[:last_idx, :], action_buffer[:last_idx, :], reward_buffer[:last_idx, :]))
+    next_state_buffer = torch.roll(state_buffer, 1, 0)
+    list_zipped = list(zip(state_buffer[:last_idx, :], action_buffer[:last_idx, :], reward_buffer[:last_idx, :], next_state_buffer[:last_idx, :]))
     np.random.shuffle(list_zipped)
-    states, actions, rewards = zip(*list_zipped)
+    states, actions, rewards, next_states = zip(*list_zipped)
     n_batches = min(math.floor(curr_buff_idx / BATCH_SZ), N_BATCHES)
     for i in range(n_batches):
-        yield states[i*BATCH_SZ:(i+1)*BATCH_SZ]), next_states[i*BATCH_SZ: (i+1)*BATCH_SZ], actions[i*BATCH_SZ:(i+1)*BATCH_SZ]), rewards[i*BATCH_SZ:(i+1)*BATCH_SZ])
+        start_idx = i*BATCH_SZ
+        end_idx = (i+1)*BATCH_SZ 
+        yield states[start_idx:end_idx], next_states[start_idx:end_idx], actions[start_idx:end_idx], rewards[start_idx:end_idx]
 
 eps = .9
 possible_actions = torch.tensor(list(range(N_ACTIONS)))
@@ -82,11 +82,11 @@ with open(fname, 'w') as outf:
             eps = eps * EPS_DECAY
 
 def gen_episode(outf):
-    with torch.no_grad(): #TODO replace corpus.dictionary.word2idx
+    with torch.no_grad():
         qnet.eval() # freeze
         #curr_token = torch.randint(ntokens, (1, 1), dtype=torch.long).to(device)
         #curr_hidden = model.init_hidden(1)
-        generated = tokenizer.encode("The Manhattan Bridge")
+        generated = tokenizer.encode("The Manhattan Bridge")# TODO generate random token
         context = torch.tensor([generated])
         past = None
        

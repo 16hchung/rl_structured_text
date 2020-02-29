@@ -55,15 +55,15 @@ print(sequence)
 qnet = QNet()
 def batch_iter():
     last_idx = min(curr_buff_idx + 1, MAX_BUF)
-    last_state = state_buffer[-1,:]
-    next_state_buffer[:-1,:] = state_buffer[1:,:]
-    next_state_buffer[0,:] = last_state
-    list_zipped = list(zip(state_buffer[:last_idx, :], next_state_buffer, action_buffer[:last_idx, :], reward_buffer[:last_idx, :]))
+    next_state_buffer = torch.roll(state_buffer, 1, 0)
+    list_zipped = list(zip(state_buffer[:last_idx, :], next_state_buffer[:last_idx,:], action_buffer[:last_idx, :], reward_buffer[:last_idx, :]))
     np.random.shuffle(list_zipped)
     states, next_states, actions, rewards = zip(*list_zipped)
     n_batches = min(math.floor(curr_buff_idx / BATCH_SZ), N_BATCHES)
     for i in range(n_batches):
-        yield states[i*BATCH_SZ:(i+1)*BATCH_SZ]), next_states[i*BATCH_SZ:(i+1)*BATCH_SZ], actions[i*BATCH_SZ:(i+1)*BATCH_SZ]), rewards[i*BATCH_SZ:(i+1)*BATCH_SZ])
+        start_idx = i*BATCH_SZ
+        end_idx = (i+1)*BATCH_SZ 
+        yield states[start_idx:end_idx], next_states[start_idx:end_idx], actions[start_idx:end_idx], rewards[start_idx:end_idx]
 
 eps = .9
 possible_actions = torch.tensor(list(range(N_ACTIONS)))
