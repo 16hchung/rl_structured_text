@@ -11,6 +11,7 @@ from utils import rand_gen_first_token
 END_TOKEN = '<|endoftext|>'
 fname = 'greedy.txt'
 MAX_LENGTH = 994
+N_EPS = 100
 
 tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 config = GPT2Config()
@@ -27,13 +28,15 @@ def gen_episode(outf):
         logits, past, _ = model(context, past=past)
         token = torch.argmax(logits[..., -1, :])
         length += 1
-        print(length)
         generated += [token.tolist()]
         context = token.unsqueeze(0)
         sequence = tokenizer.decode(generated)
         #print(sequence)
         #print('\n')
     outf.write(sequence)
+    if length == MAX_LENGTH:
+        outf.write(END_TOKEN)
 
 with open(fname, 'w') as outf:
-    gen_episode(outf)
+    for i in range(N_EPS):
+        gen_episode(outf)

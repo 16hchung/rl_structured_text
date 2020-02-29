@@ -114,8 +114,8 @@ def train(outf):
             torch.save(optimizer.state_dict(), SAVEPATH + '.optim')
             losses.append(cum_loss/EPIS_PER_EPOCH)
             print('cumulative loss: {}'.format(cum_loss/EPIS_PER_EPOCH))
-    losses = np.array(losses)
-    np.save('q_loss.npy', losses)
+            losses = np.array(losses)
+            np.save('q_loss.npy', losses)
 
 def gen_episode(model, qnet, tokenizer, outf, eps, device):
     global curr_buff_idx, state_buffer, reward_buffer, action_buffer

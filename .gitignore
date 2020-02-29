@@ -2,5 +2,6 @@ __pycache__/*
 **/__pycache__/*
 .*
 *.vim
+gpt-2/
 
 !.gitignore
