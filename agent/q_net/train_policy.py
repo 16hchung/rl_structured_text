@@ -126,6 +126,8 @@ with open(fname, 'w') as outf:
             torch.save(policy.model.state_dict(), SAVEPATH)
             torch.save(optimizer.state_dict(), SAVEPATH + '.optim')
             losses.append(cum_loss/EPIS_PER_EPOCH)
+            temp_losses = np.array(losses)
+            np.save('temp_policy_loss.npy', temp_losses)
 
 losses = np.array(losses)
 np.save('policy_loss.npy', losses)
