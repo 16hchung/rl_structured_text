@@ -65,6 +65,7 @@ def train(outf):
     qnet = QNet() #TODO: CUDA?
     qnet.to(device)
     qnet.cuda()
+    #qnet.load_state_dict(torch.load(SAVEPATH))
 
     target_qnet = QNet() #TODO: CUDA?
     target_qnet.to(device)
@@ -73,6 +74,7 @@ def train(outf):
     target_qnet.eval()
 
     optimizer = torch.optim.Adam(qnet.parameters(), lr=0.05)
+    #optimizer.load_state_dict(torch.load(SAVEPATH + '.optim'))
     criterion = torch.nn.MSELoss()
     cum_loss = 0
     losses = []
@@ -114,8 +116,7 @@ def train(outf):
             torch.save(optimizer.state_dict(), SAVEPATH + '.optim')
             losses.append(cum_loss/EPIS_PER_EPOCH)
             print('cumulative loss: {}'.format(cum_loss/EPIS_PER_EPOCH))
-            losses = np.array(losses)
-            np.save('q_loss.npy', losses)
+            np.save('q_loss.npy', np.array(losses))
 
 def gen_episode(model, qnet, tokenizer, outf, eps, device):
     global curr_buff_idx, state_buffer, reward_buffer, action_buffer
