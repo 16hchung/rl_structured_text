@@ -26,6 +26,7 @@ device = torch.device("cuda" if args.cuda else "cpu")
 ''' GPT 2 GENERATING CODE '''
 tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 config = GPT2Config()
+import pdb;pdb.set_trace()
 config.output_hidden_states = True
 model = GPT2LMHeadModel.from_pretrained('gpt2', config=config)
 

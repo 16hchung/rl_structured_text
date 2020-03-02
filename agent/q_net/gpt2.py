@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import random
 import math
+from tqdm import tqdm
 
 from .model import QNet
 
@@ -46,32 +47,14 @@ def batch_iter(device):
 
 def train(outf):
     global curr_buff_idx, state_buffer, reward_buffer, action_buffer
-    device = torch.device("cuda")# if args.cuda else "cpu")
 
     state_buffer  = torch.zeros((MAX_BUF, STATE_SZ), device=device)
     action_buffer = torch.zeros((MAX_BUF, 1), dtype=torch.int, device=device) 
     reward_buffer = torch.zeros((MAX_BUF, 1), device=device)
 
-    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-    config = GPT2Config()
-    config.output_hidden_states = True
-    model = GPT2LMHeadModel.from_pretrained('gpt2', config=config)
-
-    model.to(device)
-    model.cuda()
-
     eps = .9
 
-    qnet = QNet() #TODO: CUDA?
-    qnet.to(device)
-    qnet.cuda()
-    #qnet.load_state_dict(torch.load(SAVEPATH))
-
-    target_qnet = QNet() #TODO: CUDA?
-    target_qnet.to(device)
-    target_qnet.cuda()
-    target_qnet.load_state_dict(qnet.state_dict())
-    target_qnet.eval()
+    tokenizer, model, qnet, target_qnet, device = init_models()
 
     optimizer = torch.optim.Adam(qnet.parameters(), lr=0.05)
     #optimizer.load_state_dict(torch.load(SAVEPATH + '.optim'))
@@ -88,7 +71,7 @@ def train(outf):
         for states, next_states, actions, rewards in batch_iter(device):
             qnet.zero_grad()
             q_hat = qnet(states, actions.float())
-            # TODO generate possible_actions: shape = (batch size, n_actions)
+            # generate possible_actions: shape = (batch size, n_actions)
             possible_actions = torch.tensor(
                 [[[i] for i in range(N_ACTIONS)] for _ in range(len(actions))], 
                 device=device, dtype=torch.float
@@ -118,7 +101,42 @@ def train(outf):
             print('cumulative loss: {}'.format(cum_loss/EPIS_PER_EPOCH))
             np.save('q_loss.npy', np.array(losses))
 
-def gen_episode(model, qnet, tokenizer, outf, eps, device):
+def init_models(pretrained_path = None):
+    device = torch.device("cuda")# if args.cuda else "cpu")
+
+    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+    config = GPT2Config()
+    config.output_hidden_states = True
+    model = GPT2LMHeadModel.from_pretrained('gpt2', config=config)
+
+    model.to(device)
+    model.cuda()
+
+    qnet = QNet() 
+    qnet.to(device)
+    qnet.cuda()
+    if pretrained_path != None: qnet.load_state_dict(torch.load(pretrained_path))
+
+    target_qnet = QNet() 
+    target_qnet.to(device)
+    target_qnet.cuda()
+    target_qnet.load_state_dict(qnet.state_dict())
+    target_qnet.eval()
+
+    return tokenizer, model, qnet, target_qnet, device
+
+def generate(outf, pretrained_path, n_essays=100):
+    with torch.no_grad():
+        tokenizer, model, qnet, target_qnet, device = init_models(pretrained_path)
+
+        rewards = []
+        for _ in tqdm(range(n_essays)):
+            r = gen_episode(model, qnet, tokenizer, outf, 0, device, False)
+            rewards.append(r)
+        rewards = np.array(rewards)
+        np.save('eval_rewards.npy', rewards)
+
+def gen_episode(model, qnet, tokenizer, outf, eps, device, save_buffs=True):
     global curr_buff_idx, state_buffer, reward_buffer, action_buffer
     qnet.eval() # freeze
 
@@ -127,7 +145,7 @@ def gen_episode(model, qnet, tokenizer, outf, eps, device):
     generated, past = rand_gen_first_token(model, tokenizer, device)
     context = torch.tensor([generated], device=device)
     sequence = tokenizer.decode(generated)
-    
+    eps_reward = 0.0
     eos_encode = tokenizer.encode([END_TOKEN])[0]
     # generate trajectory for episode
     while generated[-1] != eos_encode:
@@ -140,18 +158,22 @@ def gen_episode(model, qnet, tokenizer, outf, eps, device):
         rewards, idx = torch.topk(logits[...,-1,:], k=N_ACTIONS,dim=-1)
         token = idx[..., action]
         reward = torch.softmax(rewards[0], 0)[action]
+        eps_reward += reward
         generated += token.tolist()
         context = token.unsqueeze(0)
         sequence = tokenizer.decode(generated)
-        curr_buff_idx += 1
-        state_buffer[curr_buff_idx % MAX_BUF,:] = q_state
-        reward_buffer[curr_buff_idx % MAX_BUF,:] = reward
-        action_buffer[curr_buff_idx % MAX_BUF,:] = action
+        if save_buffs:
+            curr_buff_idx += 1
+            state_buffer[curr_buff_idx % MAX_BUF,:] = q_state
+            reward_buffer[curr_buff_idx % MAX_BUF,:] = reward
+            action_buffer[curr_buff_idx % MAX_BUF,:] = action
         if len(generated) + len(prompt.split()) >= 1000:
-            reward_buffer[curr_buff_idx % MAX_BUF,:] = -100
+            if save_buffs: reward_buffer[curr_buff_idx % MAX_BUF,:] = -100
+            eps_reward -= 100
             break
         #sep = " " if sequence[-1] != END_TOKEN else "\n"
     outf.write(sequence)
+    return eps_reward / len(generated)
 
 def rand_gen_first_token(model, tokenizer, device):
     okay_tokens = [1002 , 314  , 1471 , 2141 , 383  , 843  , 1867 , 632  , 921  , 1148 , 4231 , 4362 , 770  , 554  , 
@@ -178,17 +200,16 @@ def rand_gen_first_token(model, tokenizer, device):
     return [token], past
 
 if __name__=='__main__':
-    with open(fname, 'w') as outf:
-        train(outf)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--eval', action='store_true')
+    parser.add_argument('--pretrained_path', type=str, default=None)
+    args = parser.parse_args()
+    
+    if args.eval:
+        with open('eval_generated.txt', 'w') as f:
+            generate(f, args.pretrained_path)
+    else:
+        with open(fname, 'w') as outf:
+            train(outf)
 
-#for i in range(100):
-#    print(i)
-#    output = model(context, past=past)
-#    logits = output[0]
-#    hiddens = output[2]
-#    q_state = hiddens[-1][:,-1,:]
-#    #tokens = torch.argmax(logits[..., -1, :])
-#    idx = torch.topk(logits[:,-1,:], k=5,dim=-1)[1]
-#    token = idx[0]
-#    generated += [token.tolist()]
-#    context = token.unsqueeze(0)
