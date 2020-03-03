@@ -62,12 +62,12 @@ def train(outf):
 
     eps = .9
 
-    qnet = QNet() #TODO: CUDA?
+    qnet = QNet() 
     qnet.to(device)
     qnet.cuda()
     #qnet.load_state_dict(torch.load(SAVEPATH))
 
-    target_qnet = QNet() #TODO: CUDA?
+    target_qnet = QNet() 
     target_qnet.to(device)
     target_qnet.cuda()
     target_qnet.load_state_dict(qnet.state_dict())
@@ -149,6 +149,7 @@ def gen_episode(model, qnet, tokenizer, outf, eps, device):
         action_buffer[curr_buff_idx % MAX_BUF,:] = action
         if len(generated) + len(prompt.split()) >= 1000:
             reward_buffer[curr_buff_idx % MAX_BUF,:] = -100
+            sequence += END_TOKEN
             break
         #sep = " " if sequence[-1] != END_TOKEN else "\n"
     outf.write(sequence)
