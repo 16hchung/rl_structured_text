@@ -23,15 +23,19 @@ model = GPT2LMHeadModel.from_pretrained('gpt2', config=config)
 
 def gen_episode(outf, f, eps):
     model.eval()
+    reward_sum = 0.0
     data = f.create_group('eps' + str(eps))
-    data.create_data('state', (MAX_LENGTH,), dypte='S')
-    data.create_data('emb_state', (MAX_LENGTH, 768), dypte='f')
-    data.create_data('action', (MAX_LENGTH,), dtype='i')
-    data.create_data('prob', (MAX_LENGTH,), dtype='f')
-    data.create_data('reward', (MAX_LENGTH,), dypte='f')
+    dt = h5py.string_dtype(encoding='ascii')
+    data.create_dataset('state', (MAX_LENGTH,), dtype=dt)
+    data.create_dataset('final_reward', (1,), dtype='f')
+    data.create_dataset('final_length', (1,), dtype='i')
+    #data.create_dataset('emb_state', (MAX_LENGTH, 768), dypte='f')
+    data.create_dataset('action', (MAX_LENGTH,), dtype='i')
+    data.create_dataset('prob', (MAX_LENGTH,), dtype='f')
+    data.create_dataset('reward', (MAX_LENGTH,), dtype='f')
     generated, past = rand_gen_first_token(model, tokenizer, device=None)
-    f['eps' + str(eps)]['state'][0] = generated[-1]
-    f['eps' + str(eps)]['emb_state'][0] = past
+    f['eps' + str(eps)]['state'][0] = tokenizer.decode(generated[-1])
+    #f['eps' + str(eps)]['emb_state'][0] = past
     length = 0
     context = torch.tensor([generated])
     while generated[-1] != tokenizer.encode([END_TOKEN])[0] and length < MAX_LENGTH-1:
@@ -45,13 +49,21 @@ def gen_episode(outf, f, eps):
         generated += [token]
         context = torch.tensor([token])
         sequence = tokenizer.decode(generated)
-        f['eps' +str(eps)]['state'][length+1] = generated[-1]
-        f['eps' + str(eps)]['emb_state'][length+1] = past
+        f['eps' +str(eps)]['state'][length+1] = tokenizer.decode(generated[-1])
+        #f['eps' + str(eps)]['emb_state'][length+1] = past
         f['eps' + str(eps)]['action'][length] = token_idx
-        f['eps' + str(eps)]['prob'][length] = F.softmax(logits[...,-1,token])
+        if len(F.softmax(logits[...,-1,:]).shape) == 2:
+            prob_reward = F.softmax(logits[...,-1,:])[:,token].item()
+        else:
+            prob_reward = F.softmax(logits[...,-1,:])[token].item()
+        f['eps' + str(eps)]['prob'][length] = prob_reward
+        f['eps' + str(eps)]['reward'][length] = prob_reward
+        reward_sum += prob_reward
         length += 1
     outf.write(sequence)
-    if length == MAX_LENGTH:
+    f['eps' + str(eps)]['final_reward'][0] = reward_sum
+    f['eps' + str(eps)]['final_length'][0] = length
+    if length >= MAX_LENGTH:
         outf.write(END_TOKEN)
 
 with open(fname, 'w') as outf:
