@@ -20,10 +20,10 @@ STATE_SZ = 768
 BATCH_SZ = 100
 N_BATCHES = 5 
 MAX_PATH = 1e4
-SAVEPATH = 'policy_network.bin'
+SAVEPATH = 'policy_debug.bin'
 gamma = .9
 learning_rate = .01
-fname = 'PG_generated.txt'
+fname = 'PG_debug.txt'
 MAX_LENGTH = 994 #1024
 
 paths = []
@@ -78,6 +78,7 @@ def gen_episode(outf, epi):
             else:
                 state = hiddens[-1]
             action_logits = policy(state)
+            import pdb;pdb.set_trace()
             rewards, idx = torch.topk(logits[...,-1,:], k=5, dim=-1)
             m = torch.distributions.Categorical(action_logits)
             action = m.sample().item()
