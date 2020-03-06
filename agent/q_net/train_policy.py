@@ -8,6 +8,13 @@ import numpy as np
 from policy import Policy
 import pickle
 
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--r_prob_scaler', default=1.)
+parser.add_argument('--r_tgt_word_scaler', default=0.)
+parser.add_argument('--r_simscore_scaler', default=0.)
+cmd_args = parser.parse_args()
+
 # CONSTANTS
 N_EPOCH = int(1e3)
 LOG_FREQ = 2
@@ -29,7 +36,7 @@ MAX_LENGTH = 994 #1024
 paths = []
 
 #device = torch.device("cuda" if args.cuda else "cpu")
-
+target_words = torch.load('target_words.pt').tolist()
 
 ''' GPT 2 GENERATING CODE '''
 device = torch.device('cuda')
@@ -83,20 +90,23 @@ def gen_episode(outf, epi):
             else:
                 state = hiddens[-1]
             action_logits = policy(state)
-            rewards, idx = torch.topk(logits[...,-1,:], k=5, dim=-1)
+            probs, idx = torch.topk(logits[...,-1,:], k=5, dim=-1)
             m = torch.distributions.Categorical(action_logits)
             action = m.sample().item()
-            rewards = rewards.squeeze(0)
-            reward = torch.softmax(rewards, -1)[action]
+            probs = probs.squeeze(0)
+            r_prob = torch.softmax(probs, -1)[action].item()
             idx = idx.squeeze(0)
             token = idx[action]
             generated += [token.tolist()]
             length += 1
             context = token.unsqueeze(0)
             sequence = tokenizer.decode(generated)
+            r_tgt = 1. if token in target_words else 0.
+            r_simscore = 0. # TODO
+            reward = args.r_prob_scaler*r_prob + args.r_tgt_word_scaler*r_tgt + args.r_simscore_scaler*r_simscore
             path['state'].append(state)
             path['action'].append(action)
-            path['reward'].append(reward.data.numpy())
+            path['reward'].append(np.array(reward))
         outf.write(sequence)
         if length == MAX_LENGTH:
             path['reward'][-1] -= 100
