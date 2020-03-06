@@ -32,20 +32,25 @@ paths = []
 
 
 ''' GPT 2 GENERATING CODE '''
+device = torch.device('cuda')
 tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 config = GPT2Config()
 config.output_hidden_states = True
 model = GPT2LMHeadModel.from_pretrained('gpt2', config=config)
+model.to(device)
+model.cuda()
 
 
 ''' POLICY TRAINING CODE '''
 policy = Policy()
+policy.to(device)
+policy.cuda()
 
 #policy.model.load_state_dict(torch.load(SAVEPATH))
 
 optimizer = torch.optim.RMSprop(policy.parameters(), lr=learning_rate)
 
-eps = .9
+eps = .99
 
 def get_returns(rewards):
     returns = np.zeros(len(rewards))
@@ -64,7 +69,7 @@ def gen_episode(outf, epi):
         path['reward'] = []
         policy.eval() # freeze
         generated, past = rand_gen_first_token(model, tokenizer, device=None)
-        context = torch.tensor([generated])
+        context = torch.tensor([generated], device=device)
         sequence = tokenizer.decode(generated)
         length = 1
         # generate trajectory for episode
@@ -112,12 +117,12 @@ with open(fname, 'w') as outf:
             states = path['state']
             actions = path['action']
             rewards = path['reward']
-            states = torch.cat(states)
+            states = torch.cat(states).cuda()
             rewards = np.array(rewards)
             action_logits = policy(states)
             returns = get_returns(rewards)
             m = torch.distributions.Categorical(action_logits)
-            loss = torch.mean(-m.log_prob(torch.tensor(actions)) * torch.tensor(returns))
+            loss = torch.mean(-m.log_prob(torch.tensor(actions, device=device)) * torch.tensor(returns, device=device))
             cum_loss += loss.item()
             loss.backward()
             optimizer.step()
