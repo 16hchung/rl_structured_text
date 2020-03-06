@@ -8,6 +8,13 @@ import math
 
 from .model import QNet
 
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--r_prob_scaler', default=1.)
+parser.add_argument('--r_tgt_word_scaler', default=0.)
+parser.add_argument('--r_simscore_scaler', default=0.)
+cmd_args = parser.parse_args()
+
 # CONSTANTS
 N_EPOCH = int(1e3)
 EPIS_PER_EPOCH = 5
@@ -24,6 +31,8 @@ SAVEPATH = 'q_network.bin'
 LOG_FREQ = 2
 fname = 'q_generated_txt.'
 prompt = 'Do you believe that certain materials, such as books, music, movies, magazines, etc., should be removed from the shelves if they are found offensive?'
+
+target_words = torch.load('target_words.pt').tolist()
 
 curr_buff_idx = -1
 # initialized in train(...) (don't take up memory unless we need to)
@@ -60,7 +69,7 @@ def train(outf):
     model.to(device)
     model.cuda()
 
-    eps = .9
+    eps = .99
 
     qnet = QNet() 
     qnet.to(device)
@@ -137,13 +146,16 @@ def gen_episode(model, qnet, tokenizer, outf, eps, device):
         if random.random() > eps:
             q_pred = qnet(q_state.repeat(N_ACTIONS, 1).cuda(), possible_actions)
             action = torch.argmax(q_pred)
-        rewards, idx = torch.topk(logits[...,-1,:], k=N_ACTIONS,dim=-1)
+        probs, idx = torch.topk(logits[...,-1,:], k=N_ACTIONS,dim=-1)
         token = idx[..., action]
-        reward = torch.softmax(rewards[0], 0)[action]
+        r_prob = torch.softmax(probs[0], 0)[action]
         generated += token.tolist()
         context = token.unsqueeze(0)
         sequence = tokenizer.decode(generated)
         curr_buff_idx += 1
+        r_tgt = 1. if token in target_words else 0.
+        r_simscore = 0. # TODO
+        reward = args.r_prob_scaler*r_prob + args.r_tgt_word_scaler*r_tgt + args.r_simscore_scaler*r_simscore
         state_buffer[curr_buff_idx % MAX_BUF,:] = q_state
         reward_buffer[curr_buff_idx % MAX_BUF,:] = reward
         action_buffer[curr_buff_idx % MAX_BUF,:] = action
