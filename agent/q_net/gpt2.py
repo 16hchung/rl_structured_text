@@ -9,6 +9,13 @@ from tqdm import tqdm
 
 from .model import QNet
 
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--r_prob_scaler', default=1.)
+parser.add_argument('--r_tgt_word_scaler', default=0.)
+parser.add_argument('--r_simscore_scaler', default=0.)
+cmd_args = parser.parse_args()
+
 # CONSTANTS
 N_EPOCH = int(1e3)
 EPIS_PER_EPOCH = 5
@@ -25,6 +32,8 @@ SAVEPATH = 'q_network.bin'
 LOG_FREQ = 2
 fname = 'q_generated_txt.'
 prompt = 'Do you believe that certain materials, such as books, music, movies, magazines, etc., should be removed from the shelves if they are found offensive?'
+
+target_words = torch.load('target_words.pt').tolist()
 
 curr_buff_idx = -1
 # initialized in train(...) (don't take up memory unless we need to)
@@ -52,9 +61,32 @@ def train(outf):
     action_buffer = torch.zeros((MAX_BUF, 1), dtype=torch.int, device=device) 
     reward_buffer = torch.zeros((MAX_BUF, 1), device=device)
 
+<<<<<<< HEAD
     eps = .9
 
     tokenizer, model, qnet, target_qnet, device = init_models()
+=======
+    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+    config = GPT2Config()
+    config.output_hidden_states = True
+    model = GPT2LMHeadModel.from_pretrained('gpt2', config=config)
+
+    model.to(device)
+    model.cuda()
+
+    eps = .99
+
+    qnet = QNet() 
+    qnet.to(device)
+    qnet.cuda()
+    #qnet.load_state_dict(torch.load(SAVEPATH))
+
+    target_qnet = QNet() 
+    target_qnet.to(device)
+    target_qnet.cuda()
+    target_qnet.load_state_dict(qnet.state_dict())
+    target_qnet.eval()
+>>>>>>> f8b5b938df92df934656dd480565fbd6d6279d95
 
     optimizer = torch.optim.Adam(qnet.parameters(), lr=0.05)
     #optimizer.load_state_dict(torch.load(SAVEPATH + '.optim'))
@@ -155,8 +187,9 @@ def gen_episode(model, qnet, tokenizer, outf, eps, device, save_buffs=True):
         if random.random() > eps:
             q_pred = qnet(q_state.repeat(N_ACTIONS, 1).cuda(), possible_actions)
             action = torch.argmax(q_pred)
-        rewards, idx = torch.topk(logits[...,-1,:], k=N_ACTIONS,dim=-1)
+        probs, idx = torch.topk(logits[...,-1,:], k=N_ACTIONS,dim=-1)
         token = idx[..., action]
+<<<<<<< HEAD
         reward = torch.softmax(rewards[0], 0)[action]
         eps_reward += reward
         generated += token.tolist()
@@ -170,6 +203,22 @@ def gen_episode(model, qnet, tokenizer, outf, eps, device, save_buffs=True):
         if len(generated) + len(prompt.split()) >= 1000:
             if save_buffs: reward_buffer[curr_buff_idx % MAX_BUF,:] = -100
             eps_reward -= 100
+=======
+        r_prob = torch.softmax(probs[0], 0)[action]
+        generated += token.tolist()
+        context = token.unsqueeze(0)
+        sequence = tokenizer.decode(generated)
+        curr_buff_idx += 1
+        r_tgt = 1. if token in target_words else 0.
+        r_simscore = 0. # TODO
+        reward = args.r_prob_scaler*r_prob + args.r_tgt_word_scaler*r_tgt + args.r_simscore_scaler*r_simscore
+        state_buffer[curr_buff_idx % MAX_BUF,:] = q_state
+        reward_buffer[curr_buff_idx % MAX_BUF,:] = reward
+        action_buffer[curr_buff_idx % MAX_BUF,:] = action
+        if len(generated) + len(prompt.split()) >= 1000:
+            reward_buffer[curr_buff_idx % MAX_BUF,:] = -100
+            sequence += END_TOKEN
+>>>>>>> f8b5b938df92df934656dd480565fbd6d6279d95
             break
         #sep = " " if sequence[-1] != END_TOKEN else "\n"
     outf.write(sequence)
