@@ -62,6 +62,8 @@ def gen_episode(outf, f, eps):
     f['eps'+str(eps)]['final_reward'][0] = reward_sum
     f['eps'+str(eps)]['final_length'][0] = length
     if length >= MAX_LENGTH:
+        f['eps'+str(eps)]['reward'][length] -= 100
+        f['eps'+str(eps)]['final_reward'][0] -= 100
         outf.write(END_TOKEN)
 
 with open(fname, 'w') as outf:

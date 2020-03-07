@@ -7,12 +7,13 @@ import random
 import numpy as np
 from policy import Policy
 import pickle
-
+import math
+import h5py
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--r_prob_scaler', default=1.)
-parser.add_argument('--r_tgt_word_scaler', default=0.)
-parser.add_argument('--r_simscore_scaler', default=0.)
+parser.add_argument('--r_tgt_word_scaler', default=1.)
+parser.add_argument('--r_simscore_scaler', default=0.5)
 cmd_args = parser.parse_args()
 
 # CONSTANTS
@@ -20,6 +21,7 @@ N_EPOCH = int(1e3)
 LOG_FREQ = 2
 EPIS_PER_EPOCH = 5
 MAX_BUF = 1e4
+MIN_LENGTH = 100
 END_TOKEN = '<|endoftext|>'
 EPS_DECAY = .9
 N_ACTIONS = 5
@@ -28,11 +30,11 @@ BATCH_SZ = 100
 N_BATCHES = 5 
 MAX_PATH = 1e4
 SAVEPATH = 'policy_network.bin'
-gamma = .9
+gamma = .99
 learning_rate = .01
 fname = 'PG_generated.txt'
 MAX_LENGTH = 994 #1024
-
+FILEPATH = 'PG'
 paths = []
 
 #device = torch.device("cuda" if args.cuda else "cpu")
@@ -67,7 +69,20 @@ def get_returns(rewards):
         returns[i] = np.array(r) @ np.array(discount)
     return returns
 
-def gen_episode(outf, epi):
+def gen_episode(outf, epi, f, epoch, data):
+    d = data.create_group('eps' + str(epi))
+    reward_sum = 0.0
+    dt = h5py.string_dtype(encoding='ascii') 
+    d.create_dataset('state', (MAX_LENGTH+1,), dtype=dt)
+    d.create_dataset('emb_state', (MAX_LENGTH+1,768), dtype='f')
+    d.create_dataset('action', (MAX_LENGTH+1,), dtype='i')
+    d.create_dataset('prob', (MAX_LENGTH+1,), dtype='f')
+    d.create_dataset('scaled_reward_prob', (MAX_LENGTH+1,), dtype='f')
+    d.create_dataset('scaled_reward_target', (MAX_LENGTH+1,), dtype='f')
+    d.create_dataset('scaled_reward_sim', (MAX_LENGTH+1,), dtype='f')
+    d.create_dataset('combined_reward', (MAX_LENGTH+1,), dtype='f')
+    d.create_dataset('final_length', (1,), dtype='f')
+    d.create_dataset('final_reward', (1,), dtype='f')
     with torch.no_grad():
         model.eval()
         path = {}
@@ -75,12 +90,14 @@ def gen_episode(outf, epi):
         path['action'] = []
         path['reward'] = []
         policy.eval() # freeze
-        generated, past = rand_gen_first_token(model, tokenizer, device=None)
+        generated, past, init_state = rand_gen_first_token(model, tokenizer, device=device) #None)
         context = torch.tensor([generated], device=device)
         sequence = tokenizer.decode(generated)
-        length = 1
+        f['epoch' + str(epoch)]['eps' + str(epi)]['state'][0] = tokenizer.decode(generated[-1])
+        f['epoch' + str(epoch)]['eps' + str(epi)]['emb_state'][0] = init_state.cpu()
+        length = 0
         # generate trajectory for episode
-        while generated[-1] != tokenizer.encode([END_TOKEN])[0] and length < MAX_LENGTH:
+        while generated[-1] != tokenizer.encode([END_TOKEN])[0] and length < MAX_LENGTH-1:
             logits, past, hiddens = model(context, past=past)
             #logits = output[0]
             #past = output[1]
@@ -102,26 +119,48 @@ def gen_episode(outf, epi):
             context = token.unsqueeze(0)
             sequence = tokenizer.decode(generated)
             r_tgt = 1. if token in target_words else 0.
-            r_simscore = 0. # TODO
-            reward = args.r_prob_scaler*r_prob + args.r_tgt_word_scaler*r_tgt + args.r_simscore_scaler*r_simscore
+            r_simscore = math.sqrt(abs((init_state[0] @ state[0]).item()))/768.0
+            sim_reward = cmd_args.r_simscore_scaler * r_simscore
+            tgt_reward = cmd_args.r_tgt_word_scaler * r_tgt
+            prob_reward = cmd_args.r_prob_scaler * r_prob
+            reward = prob_reward + tgt_reward + sim_reward
+            f['epoch' + str(epoch)]['eps' + str(epi)]['state'][length+1] = tokenizer.decode(generated[-1])
+            f['epoch' + str(epoch)]['eps' + str(epi)]['emb_state'][length+1] = state.cpu()
+            f['epoch' + str(epoch)]['eps' + str(epi)]['scaled_reward_prob'][length] = prob_reward
+            f['epoch' + str(epoch)]['eps' + str(epi)]['scaled_reward_target'][length] = tgt_reward
+            f['epoch' + str(epoch)]['eps' + str(epi)]['scaled_reward_sim'][length] = sim_reward
+            f['epoch' + str(epoch)]['eps' + str(epi)]['combined_reward'][length] = reward
+            f['epoch' + str(epoch)]['eps' + str(epi)]['prob'][length] = r_prob
+            f['epoch' + str(epoch)]['eps' + str(epi)]['action'][length] = action
             path['state'].append(state)
             path['action'].append(action)
             path['reward'].append(np.array(reward))
         outf.write(sequence)
-        if length == MAX_LENGTH:
+        f['epoch' + str(epoch)]['eps' + str(epi)]['final_length'][0] = length 
+        f['epoch' + str(epoch)]['eps' + str(epi)]['final_reward'][0] = reward_sum
+        if length < MIN_LENGTH:
+            path['reward'][-1] -= 200
+            f['epoch' + str(epoch)]['eps' + str(epi)]['final_reward'][0] -= 200
+            f['epoch' + str(epoch)]['eps' + str(epi)]['combined_reward'][-1] -= 200
+        if length >= MAX_LENGTH:
+            outf.write(END_TOKEN)
             path['reward'][-1] -= 100
+            f['epoch' + str(epoch)]['eps' + str(epi)]['final_reward'][0] -= 100
+            f['epoch' + str(epoch)]['eps' + str(epi)]['combined_reward'][-1] -= 100
         paths.append(path)
-
 
 losses = []
 with open(fname, 'w') as outf:
+    f = h5py.File(FILEPATH + '.hdf5', 'w')
     for epoch in range(N_EPOCH):
+        data = f.create_group('epoch' + str(epoch))
         for epi in range(EPIS_PER_EPOCH):
-            gen_episode(outf, epi)
-            outf.write('\n')
-            outf.write('\n')
+            gen_episode(outf, epi, f, epoch, data)
+            #outf.write('\n')
+            #outf.write('\n')
         policy.train()
         cum_loss = 0
+        # train the network after every epoch (= 5 eps per epoch)
         for path in paths:
             optimizer.zero_grad()
             states = path['state']
@@ -143,6 +182,9 @@ with open(fname, 'w') as outf:
             losses.append(cum_loss/EPIS_PER_EPOCH)
             temp_losses = np.array(losses)
             np.save('temp_policy_loss.npy', temp_losses)
+        print('Finished epoch!')
+    f.close()
+    print('DONE')
 
 losses = np.array(losses)
 np.save('policy_loss.npy', losses)

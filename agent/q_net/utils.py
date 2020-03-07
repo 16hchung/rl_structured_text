@@ -31,10 +31,16 @@ def rand_gen_first_token(model, tokenizer, device):
     generated = tokenizer.encode(prompt)
     context = torch.tensor([generated]) #, device=torch.device('cpu'))
     # do one iteration but not greedy to generate random token
-    logits, past, _= model(context, past=None)
+    model.to(device)
+    model.cuda()
+    logits, past, hiddens= model(context.to(device), past=None)
     token = None
+    if len(hiddens[-1].shape) > 2:
+        state = hiddens[-1][:,-1,:]
+    else:
+        state = hiddens[-1]
     while token not in okay_tokens:
         topk = torch.topk(F.softmax(logits[...,-1,:], 1),150)
         token_idx = torch.multinomial(topk.values, 1).item()
         token = topk.indices[0,token_idx].item()
-    return [token], past
+    return [token], past, state

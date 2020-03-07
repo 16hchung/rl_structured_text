@@ -64,11 +64,15 @@ def gen_episode(outf, f, eps):
     f['eps' + str(eps)]['final_reward'][0] = reward_sum
     f['eps' + str(eps)]['final_length'][0] = length
     if length >= MAX_LENGTH:
+        f['eps' + str(eps)]['final_reward'][0] -= 100
+        f['eps' + str(eps)]['reward'][-1] -= 100
         outf.write(END_TOKEN)
 
 with open(fname, 'w') as outf:
     f = h5py.File(FILEPATH + '.hdf5', 'w')
     for i in range(N_EPS):
         gen_episode(outf, f, i)
+        print('END OF EPS')
     f.close()
+    print('END OF OUTF')
 

@@ -17,11 +17,10 @@ model = GPT2LMHeadModel.from_pretrained('gpt2', config=config)
 model.to(device)
 model.cuda()
 
-import pdb;pdb.set_trace()
 text_idx = tokenizer.encode(prompt)
 word_vectors = model.transformer.wte.weight[text_idx,:]
 avg_vec = word_vectors.mean(dim=0, keepdims=True)
-distances = model.transformers.wte.weight @ avg_vec.T
+distances = model.transformer.wte.weight @ avg_vec.T
 
-topk = torch.topk(distances, 100)
-torch.save(topk.indices, 'target_words. pt')
+x, topk = torch.topk(distances, k=100, dim=0)
+torch.save(topk, 'target_words.pt')
