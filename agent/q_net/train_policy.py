@@ -1,5 +1,5 @@
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, GPT2Config, BertForNextSentencePrediction, BertTokenizer
-from utils import rand_gen_first_token
+from utils import rand_gen_first_token, get_essay_samples, evaluator
 import torch
 import torch.nn
 import torch.distributions
@@ -33,12 +33,12 @@ STATE_SZ = 768
 BATCH_SZ = 100
 N_BATCHES = 5 
 MAX_PATH = 1e4
-SAVEPATH = 'PG_combined_r_network.bin'
+SAVEPATH = 'dummy.bin'
 gamma = .99
 learning_rate = .01
-fname = 'PG_combined_r.txt'
+fname = 'dummy.txt'
 MAX_LENGTH = 994 #1024
-FILEPATH = 'PG_combined_r'
+FILEPATH = 'dummy'
 paths = []
 
 #device = torch.device("cuda" if args.cuda else "cpu")
@@ -57,16 +57,17 @@ bert_model = BertForNextSentencePrediction.from_pretrained('bert-base-cased')
 bert_tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
 
 ''' POLICY TRAINING CODE '''
-if args.gpt_as_policy:
+if cmd_args.gpt_as_policy:
     policy = GPT2LMHeadModel.from_pretrained('gpt2', config = config)
 else:
     policy = Policy()
 policy.to(device)
 policy.cuda()
 
+SAMPLES = get_essay_samples()
 #policy.model.load_state_dict(torch.load(SAVEPATH))
 
-if args.gpt_as_policy:
+if cmd_args.gpt_as_policy:
     optimizer = torch.optim.RMSprop(policy.lm_head.parameters(), lr=learning_rate)
 else:
     optimizer = torch.optim.RMSprop(policy.parameters(), lr=learning_rate)
@@ -122,7 +123,7 @@ def gen_episode(outf, epi, f, epoch, data):
                 state = hiddens[-1][:,-1,:]
             else:
                 state = hiddens[-1]
-            if args.gpt_as_policy:
+            if cmd_args.gpt_as_policy:
                 logits, _,_ = policy(state)
                 probs = torch.softmax(logits, -1)
                 m = torch.distributions.Categorical(probs)
@@ -169,6 +170,7 @@ def gen_episode(outf, epi, f, epoch, data):
             path['action'].append(action)
             path['reward'].append(np.array(reward))
         outf.write(sequence)
+        r_score = evaluator(SAMPLES, model, tokenizer, sequence, device)
         f['epoch' + str(epoch)]['eps' + str(epi)]['final_length'][0] = length 
         f['epoch' + str(epoch)]['eps' + str(epi)]['final_reward'][0] = reward_sum
         if length < MIN_LENGTH:
@@ -218,11 +220,12 @@ with open(fname, 'w') as outf:
             torch.save(optimizer.state_dict(), SAVEPATH + '.optim')
             losses.append(cum_loss/EPIS_PER_EPOCH)
             temp_losses = np.array(losses)
-            np.save('PG_combined_r_training_loss.npy', temp_losses)
+            COMMON_NAME = 'dummy_'
+            np.save(COMMON_NAME + 'training_loss.npy', temp_losses)
             rewards_np = np.array(rewards_arr)
-            np.save('PG_combined_r_rewards.npy', rewards_np)
+            np.save(COMMON_NAME + 'rewards.npy', rewards_np)
             length_np = np.array(length_arr)
-            np.save('PG_combined_r_length.npy', length_np)
+            np.save(COMMON_NAME + 'length.npy', length_np)
         print('Finished epoch!' + str(epoch))
     f.close()
     print('DONE')
