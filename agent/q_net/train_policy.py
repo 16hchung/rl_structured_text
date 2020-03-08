@@ -1,4 +1,4 @@
-from transformers import GPT2LMHeadModel, GPT2Tokenizer, GPT2Config
+from transformers import GPT2LMHeadModel, GPT2Tokenizer, GPT2Config, BertForNextSentencePrediction, BertTokenizer
 from utils import rand_gen_first_token
 import torch
 import torch.nn
@@ -10,14 +10,18 @@ import pickle
 import math
 import h5py
 import argparse
+from sequential import bert_seq
 parser = argparse.ArgumentParser()
+parser.add_argument('--gpt_as_policy', action='store_true')
 parser.add_argument('--r_prob_scaler', default=1.)
 parser.add_argument('--r_tgt_word_scaler', default=1.)
-parser.add_argument('--r_simscore_scaler', default=0.5)
+parser.add_argument('--r_simscore_scaler', default=.5)
+parser.add_argument('--r_seq_scaler', default=.5)
 cmd_args = parser.parse_args()
 
 # CONSTANTS
-N_EPOCH = int(1e3)
+SENT_END_TOKENS = ['.', '?', '!'] #, '\n']
+N_EPOCH = int(200)
 LOG_FREQ = 2
 EPIS_PER_EPOCH = 5
 MAX_BUF = 1e4
@@ -29,12 +33,12 @@ STATE_SZ = 768
 BATCH_SZ = 100
 N_BATCHES = 5 
 MAX_PATH = 1e4
-SAVEPATH = 'policy_network.bin'
+SAVEPATH = 'PG_combined_r_network.bin'
 gamma = .99
 learning_rate = .01
-fname = 'PG_generated.txt'
+fname = 'PG_combined_r.txt'
 MAX_LENGTH = 994 #1024
-FILEPATH = 'PG'
+FILEPATH = 'PG_combined_r'
 paths = []
 
 #device = torch.device("cuda" if args.cuda else "cpu")
@@ -46,28 +50,38 @@ tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 config = GPT2Config()
 config.output_hidden_states = True
 model = GPT2LMHeadModel.from_pretrained('gpt2', config=config)
+model.eval()
 model.to(device)
 model.cuda()
-
+bert_model = BertForNextSentencePrediction.from_pretrained('bert-base-cased')
+bert_tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
 
 ''' POLICY TRAINING CODE '''
-policy = Policy()
+if args.gpt_as_policy:
+    policy = GPT2LMHeadModel.from_pretrained('gpt2', config = config)
+else:
+    policy = Policy()
 policy.to(device)
 policy.cuda()
 
 #policy.model.load_state_dict(torch.load(SAVEPATH))
 
-optimizer = torch.optim.RMSprop(policy.parameters(), lr=learning_rate)
+if args.gpt_as_policy:
+    optimizer = torch.optim.RMSprop(policy.lm_head.parameters(), lr=learning_rate)
+else:
+    optimizer = torch.optim.RMSprop(policy.parameters(), lr=learning_rate)
 
 eps = .99
 
 def get_returns(rewards):
     returns = np.zeros(len(rewards))
+    cum_rewards = np.sum(rewards)
+    sent_length = len(rewards)
     for i in range(len(rewards)):
         r = rewards[i:]
         discount = [gamma ** t for t in range(len(r))]
         returns[i] = np.array(r) @ np.array(discount)
-    return returns
+    return returns, cum_rewards, sent_length
 
 def gen_episode(outf, epi, f, epoch, data):
     d = data.create_group('eps' + str(epi))
@@ -96,25 +110,36 @@ def gen_episode(outf, epi, f, epoch, data):
         f['epoch' + str(epoch)]['eps' + str(epi)]['state'][0] = tokenizer.decode(generated[-1])
         f['epoch' + str(epoch)]['eps' + str(epi)]['emb_state'][0] = init_state.cpu()
         length = 0
+        prev_sent = None
+        cur_sent = [generated[0]]
         # generate trajectory for episode
         while generated[-1] != tokenizer.encode([END_TOKEN])[0] and length < MAX_LENGTH-1:
             logits, past, hiddens = model(context, past=past)
             #logits = output[0]
             #past = output[1]
-            #hiddens = output[2]
+            #hiddens = output[2] 
             if len(hiddens[-1].shape) > 2:
                 state = hiddens[-1][:,-1,:]
             else:
                 state = hiddens[-1]
-            action_logits = policy(state)
-            probs, idx = torch.topk(logits[...,-1,:], k=5, dim=-1)
-            m = torch.distributions.Categorical(action_logits)
-            action = m.sample().item()
-            probs = probs.squeeze(0)
-            r_prob = torch.softmax(probs, -1)[action].item()
-            idx = idx.squeeze(0)
-            token = idx[action]
+            if args.gpt_as_policy:
+                logits, _,_ = policy(state)
+                probs = torch.softmax(logits, -1)
+                m = torch.distributions.Categorical(probs)
+                action = m.sample().item()
+                r_prob = probs[action].item()
+                token = action
+            else:
+                action_logits = policy(state)
+                probs, idx = torch.topk(logits[...,-1,:], k=5, dim=-1)
+                m = torch.distributions.Categorical(action_logits)
+                action = m.sample().item()
+                probs = probs.squeeze(0)
+                r_prob = torch.softmax(probs, -1)[action].item()
+                idx = idx.squeeze(0)
+                token = idx[action]
             generated += [token.tolist()]
+            cur_sent += [token.tolist()]
             length += 1
             context = token.unsqueeze(0)
             sequence = tokenizer.decode(generated)
@@ -123,7 +148,15 @@ def gen_episode(outf, epi, f, epoch, data):
             sim_reward = cmd_args.r_simscore_scaler * r_simscore
             tgt_reward = cmd_args.r_tgt_word_scaler * r_tgt
             prob_reward = cmd_args.r_prob_scaler * r_prob
-            reward = prob_reward + tgt_reward + sim_reward
+            r_seq = 0.0
+            if tokenizer.decode(generated[-1]) in SENT_END_TOKENS:
+                cur_sent = tokenizer.decode(cur_sent)
+                if prev_sent is not None:
+                    r_seq = bert_seq(device, bert_model, bert_tokenizer, prev_sent, cur_sent)
+                prev_sent = cur_sent
+                cur_sent = []
+            seq_reward = cmd_args.r_seq_scaler * r_seq
+            reward = prob_reward + tgt_reward + sim_reward + seq_reward
             f['epoch' + str(epoch)]['eps' + str(epi)]['state'][length+1] = tokenizer.decode(generated[-1])
             f['epoch' + str(epoch)]['eps' + str(epi)]['emb_state'][length+1] = state.cpu()
             f['epoch' + str(epoch)]['eps' + str(epi)]['scaled_reward_prob'][length] = prob_reward
@@ -150,6 +183,8 @@ def gen_episode(outf, epi, f, epoch, data):
         paths.append(path)
 
 losses = []
+length_arr = []
+rewards_arr = []
 with open(fname, 'w') as outf:
     f = h5py.File(FILEPATH + '.hdf5', 'w')
     for epoch in range(N_EPOCH):
@@ -169,7 +204,9 @@ with open(fname, 'w') as outf:
             states = torch.cat(states).cuda()
             rewards = np.array(rewards)
             action_logits = policy(states)
-            returns = get_returns(rewards)
+            returns, cum_rewards, sent_length = get_returns(rewards)
+            rewards_arr.append(cum_rewards)
+            length_arr.append(sent_length)
             m = torch.distributions.Categorical(action_logits)
             loss = torch.mean(-m.log_prob(torch.tensor(actions, device=device)) * torch.tensor(returns, device=device))
             cum_loss += loss.item()
@@ -181,8 +218,12 @@ with open(fname, 'w') as outf:
             torch.save(optimizer.state_dict(), SAVEPATH + '.optim')
             losses.append(cum_loss/EPIS_PER_EPOCH)
             temp_losses = np.array(losses)
-            np.save('temp_policy_loss.npy', temp_losses)
-        print('Finished epoch!')
+            np.save('PG_combined_r_training_loss.npy', temp_losses)
+            rewards_np = np.array(rewards_arr)
+            np.save('PG_combined_r_rewards.npy', rewards_np)
+            length_np = np.array(length_arr)
+            np.save('PG_combined_r_length.npy', length_np)
+        print('Finished epoch!' + str(epoch))
     f.close()
     print('DONE')
 
