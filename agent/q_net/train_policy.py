@@ -1,4 +1,4 @@
-from transformers import GPT2LMHeadModel, GPT2Tokenizer, GPT2Config, BertForNextSentencePrediction, BertTokenizer
+from transformers import GPT2LMHeadModel, GPT2Tokenizer, GPT2Config, BertForNextSentencePrediction, BertTokenizer, BertConfig
 from utils import rand_gen_first_token, get_essay_samples, evaluator
 import torch
 import torch.nn
@@ -36,9 +36,9 @@ MAX_PATH = 1e4
 SAVEPATH = 'dummy.bin'
 gamma = .99
 learning_rate = .01
-fname = 'dummy.txt'
-MAX_LENGTH = 994 #1024
-FILEPATH = 'dummy'
+fname = 'PG_combined.txt'
+MAX_LENGTH = 993 # 1024 -- GENERATED TEXT LIMITED TO 1024 BY THE GPT2 POSITIONAL ENCODINGS STRUCTURE
+FILEPATH = 'PG_combined'
 paths = []
 
 #device = torch.device("cuda" if args.cuda else "cpu")
@@ -53,9 +53,11 @@ model = GPT2LMHeadModel.from_pretrained('gpt2', config=config)
 model.eval()
 model.to(device)
 model.cuda()
+#bert_config = BertConfig()
+#bert_config.max_position_embeddings = 1024
+## MAX POSITIONAL ENCODINGS OF BERT LIMITS THE SENTENCE LENGTH TO 512 TOKENS
 bert_model = BertForNextSentencePrediction.from_pretrained('bert-base-cased')
 bert_tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
-
 ''' POLICY TRAINING CODE '''
 if cmd_args.gpt_as_policy:
     policy = GPT2LMHeadModel.from_pretrained('gpt2', config = config)
@@ -64,7 +66,7 @@ else:
 policy.to(device)
 policy.cuda()
 
-SAMPLES = get_essay_samples()
+#SAMPLES = get_essay_samples()
 #policy.model.load_state_dict(torch.load(SAVEPATH))
 
 if cmd_args.gpt_as_policy:
@@ -151,8 +153,8 @@ def gen_episode(outf, epi, f, epoch, data):
             prob_reward = cmd_args.r_prob_scaler * r_prob
             r_seq = 0.0
             if tokenizer.decode(generated[-1]) in SENT_END_TOKENS:
-                cur_sent = tokenizer.decode(cur_sent)
-                if prev_sent is not None:
+                cur_sent = tokenizer.decode(cur_sent[:512]) # max sentence length 512
+                if prev_sent is not None: 
                     r_seq = bert_seq(device, bert_model, bert_tokenizer, prev_sent, cur_sent)
                 prev_sent = cur_sent
                 cur_sent = []
@@ -170,7 +172,7 @@ def gen_episode(outf, epi, f, epoch, data):
             path['action'].append(action)
             path['reward'].append(np.array(reward))
         outf.write(sequence)
-        r_score = evaluator(SAMPLES, model, tokenizer, sequence, device)
+        #r_score = evaluator(SAMPLES, model, tokenizer, sequence, device)
         f['epoch' + str(epoch)]['eps' + str(epi)]['final_length'][0] = length 
         f['epoch' + str(epoch)]['eps' + str(epi)]['final_reward'][0] = reward_sum
         if length < MIN_LENGTH:
@@ -220,7 +222,7 @@ with open(fname, 'w') as outf:
             torch.save(optimizer.state_dict(), SAVEPATH + '.optim')
             losses.append(cum_loss/EPIS_PER_EPOCH)
             temp_losses = np.array(losses)
-            COMMON_NAME = 'dummy_'
+            COMMON_NAME = 'PG_combined_'
             np.save(COMMON_NAME + 'training_loss.npy', temp_losses)
             rewards_np = np.array(rewards_arr)
             np.save(COMMON_NAME + 'rewards.npy', rewards_np)
@@ -231,5 +233,5 @@ with open(fname, 'w') as outf:
     print('DONE')
 
 losses = np.array(losses)
-np.save('policy_loss.npy', losses)
+np.save('PG_combined_policy_loss.npy', losses)
 
