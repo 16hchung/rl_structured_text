@@ -265,7 +265,7 @@ with open(fname, 'w') as outf:
             rewards_file = 'GPTasPG_combined_r_rewards.npy' if cmd_args.gpt_as_policy else 'PG_combined_r_rewards.npy'
             np.save(rewards_file, rewards_np)
             length_np = np.array(length_arr)
-            length_file = 'PG_combined_r_length.npy' if cmd_args.gpt_as_policy else 'PG_combined_r_length.npy'
+            length_file = 'GPTasPG_combined_r_length.npy' if cmd_args.gpt_as_policy else 'PG_combined_r_length.npy'
             np.save(length_file, length_np)
             print(last_sent)
         print('Finished epoch!' + str(epoch))
