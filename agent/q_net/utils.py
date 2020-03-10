@@ -5,10 +5,118 @@ import torch.nn as nn
 import torch.nn.functional as F
 import random
 import math
+import csv
+import pandas as pd
 
 # GLOBAL
 prompt = 'Do you believe that certain materials, such as books, music, movies, magazines, etc., should be removed from the shelves if they are found offensive?'
 
+def scores_from_df(df):
+    domain_cols = ['domain1_score', 'domain2_score']
+    scores = df[domain_cols].to_numpy()
+    scores = np.ceil(np.average(scores, axis=1))
+    return scores
+
+TOT = 5
+def sample_per_score(df, essays):
+    for s in range(2):
+        s1 = np.array((essays[s][0])['essay_id'].values)
+        s2 = np.array((essays[s][1])['essay_id'].values)
+        s3 = np.array((essays[s][2])['essay_id'].values)
+        choices = np.concatenate((s1,s2,s3), -1)
+        #idx = np.random.choice(data['essay_id'], size=TOT,replace=True)
+        idx = np.random.choice(choices, size=TOT, replace=True)
+        batch = []
+        for i in idx:
+            batch.append(df[df['essay_id'] == i].get(['essay'])) #.values[0,0])
+            #batch.append(data[data['essay_id'] == i].get(['essay']))
+        yield batch
+
+EXPATH = '/home/nlp/rl_structured_text/lm/training_set_rel3.tsv'
+def evaluator(df, essays, model, tokenizer, sample, device):
+    tokenized = tokenizer.encode(sample)
+    output = torch.tensor([tokenized])
+    model.eval()
+    model.to(device)
+    model.cuda()
+    _, _, hiddens = model(output.to(device), past=None)
+    our_emb = hiddens[-1][:,-1,:]
+    scores_list = []
+    batches = []
+    for batch in sample_per_score(df, essays):
+        scores = []
+        #scores_s1 = []
+        #scores_s2 = []
+        #s1_tokenized = tokenizer.encode(sample1.values[0][0][:1024])
+        #s2_tokenized = tokenizer.encode(sample2.values[0][0][:1024])
+        #s1 = torch.tensor([s1_tokenized])
+        #s2 = torch.tensor([s2_tokenized])
+        #_, _, sample_h1 = model(s1.to(device), past=None)
+        #_, _, sample_h2 = model(s2.to(device), past=None)
+        #sample_h1_emb = sample_h1[-1][:,-1,:]
+        #sample_h2_emb = sample_h2[-1][:,-1,:]
+
+        for essay in batch:
+            #essay_tokenized = tokenizer.encode(essay[:1024])
+            essay_tokenized = tokenizer.encode(essay.values[0][0][:1024])
+            essay_output = torch.tensor([essay_tokenized])
+            _, _, sample_hiddens = model(essay_output.to(device), past=None)
+            sample_emb = sample_hiddens[-1][:,-1,:]
+            sim = our_emb.squeeze(0) @ sample_emb.squeeze(0)
+            #scores_s1.append((sample_h1_emb.squeeze(0) @ sample_emb.squeeze(0)).item())
+            #scores_s2.append((sample_h2_emb.squeeze(0) @ sample_emb.squeeze(0)).item())
+            scores.append(sim.item())
+        scores = np.array(scores)
+        score = np.mean(scores)
+        scores_list.append(score)
+    nearest = np.argmax(scores_list)
+    return nearest + 1
+
+def get_essay_samples():
+    df = pd.read_csv(EXPATH, sep='\t', header=0, encoding='latin1')
+    df = df[df['essay_set'] == 2]
+    scores = scores_from_df(df)
+    essays = []
+    score_range = np.linspace(1.0, 6.0, num=6)
+    for score in score_range:
+        essays.append(df[scores==score])
+    return essays
+
+def get_essay_samples1():
+    df = pd.read_csv(EXPATH, sep='\t', header=0, encoding='latin1')
+    df = df[df['essay_set'] == 2]
+    scores = scores_from_df(df)
+    essays = []
+    sampled_essays = []
+    #score_range = np.linspace(1.0, 6.0, num=6)
+    score_range = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+    for score in score_range:
+        essays.append([df[scores==s][:-2] for s in score])
+        print('====:)====')
+        essay1 = df[scores==1.0][-2:-1]['essay'].values[0] 
+        essay2 = df[scores==5.0][-1:]['essay'].values[0]
+        sampled_essays.append((essay1, essay2))
+    return df, essays, sampled_essays
+
+device = torch.device('cuda')
+tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+config = GPT2Config()
+config.output_hidden_states = True
+model = GPT2LMHeadModel.from_pretrained('gpt2', config=config)
+model.eval()
+model.to(device)
+model.cuda()
+
+df, SAMPLES, SEQUENCES = get_essay_samples1()
+true_label = 1
+for (seq1, seq2) in SEQUENCES:
+    print('true', true_label)
+    r_score1 = evaluator(df, SAMPLES, model, tokenizer, seq1, device)
+    print(r_score1)
+    r_score2 = evaluator(df, SAMPLES, model, tokenizer, seq2, device)
+    print(r_score2)
+    print('====')
+    true_label += 1
 
 #tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 #config = GPT2Config()

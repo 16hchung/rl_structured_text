@@ -1,6 +1,6 @@
-from transformers import GPT2LMHeadModel, GPT2Tokenizer, GPT2Config, BertForNextSentencePrediction, BertTokenizer
-from utils import rand_gen_first_token, prompt
 from copy import deepcopy
+from transformers import GPT2LMHeadModel, GPT2Tokenizer, GPT2Config, BertForNextSentencePrediction, BertTokenizer, BertConfig
+from utils import rand_gen_first_token, get_essay_samples, evaluator
 import torch
 import torch.nn
 import torch.distributions
@@ -35,11 +35,12 @@ STATE_SZ = 768
 BATCH_SZ = 100
 N_BATCHES = 5 
 MAX_PATH = 1e4
+<<<<<<< HEAD
 SAVEPATH = 'GPTasPG_combined_r_network.bin' if cmd_args.gpt_as_policy else 'PG_combined_r_network.bin'
 gamma = .99
 learning_rate = .01
 fname = 'GPTasPG_combined_r.txt' if cmd_args.gpt_as_policy else 'PG_combined_r.txt'
-MAX_LENGTH = 993 #1024
+MAX_LENGTH = 993 #1024-- GENERATED TEXT LIMITED TO 1024 BY THE GPT2 POSITIONAL ENCODINGS STRUCTURE
 FILEPATH = 'GPTasPG_combined_r' if cmd_args.gpt_as_policy else 'PG_combined_r'
 paths = []
 
@@ -55,9 +56,11 @@ model = GPT2LMHeadModel.from_pretrained('gpt2', config=config)
 model.eval()
 model.to(device)
 model.cuda()
+#bert_config = BertConfig()
+#bert_config.max_position_embeddings = 1024
+## MAX POSITIONAL ENCODINGS OF BERT LIMITS THE SENTENCE LENGTH TO 512 TOKENS
 bert_model = BertForNextSentencePrediction.from_pretrained('bert-base-cased')
 bert_tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
-
 ''' POLICY TRAINING CODE '''
 if cmd_args.gpt_as_policy:
     policy = model
@@ -71,6 +74,7 @@ else:
 policy.to(device)
 policy.cuda()
 
+#SAMPLES = get_essay_samples()
 #policy.model.load_state_dict(torch.load(SAVEPATH))
 
 if cmd_args.gpt_as_policy:
@@ -178,7 +182,7 @@ def gen_episode(outf, epi, f, epoch, data):
             r_seq = 0.0
             if tokenizer.decode(generated[-1]) in SENT_END_TOKENS:
                 cur_sent = tokenizer.decode(cur_sent[:511])[:511]
-                if prev_sent is not None:
+                if prev_sent is not None: 
                     r_seq = bert_seq(device, bert_model, bert_tokenizer, prev_sent, cur_sent)
                 prev_sent = cur_sent[:511]
                 cur_sent = []
@@ -199,6 +203,7 @@ def gen_episode(outf, epi, f, epoch, data):
         outf.write(sequence)
         if cmd_args.gpt_as_policy:
             path['state'] = generated
+        #r_score = evaluator(SAMPLES, model, tokenizer, sequence, device)
         f['epoch' + str(epoch)]['eps' + str(epi)]['final_length'][0] = length 
         f['epoch' + str(epoch)]['eps' + str(epi)]['final_reward'][0] = reward_sum
         if length < MIN_LENGTH:
