@@ -1,6 +1,6 @@
 from copy import deepcopy
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, GPT2Config, BertForNextSentencePrediction, BertTokenizer, BertConfig
-from utils import rand_gen_first_token, get_essay_samples, evaluator
+from utils import rand_gen_first_token, get_essay_samples, evaluator, prompt
 import torch
 import torch.nn
 import torch.distributions
@@ -14,7 +14,7 @@ import argparse
 from sequential import bert_seq
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpt_as_policy', action='store_true')
-parser.add_argument('--r_prob_scaler', default=6.)
+parser.add_argument('--r_prob_scaler', default=20.)
 parser.add_argument('--r_tgt_word_scaler', default=1.)
 parser.add_argument('--r_simscore_scaler', default=.5)
 parser.add_argument('--r_seq_scaler', default=.5)
@@ -35,7 +35,6 @@ STATE_SZ = 768
 BATCH_SZ = 100
 N_BATCHES = 5 
 MAX_PATH = 1e4
-<<<<<<< HEAD
 SAVEPATH = 'GPTasPG_combined_r_network.bin' if cmd_args.gpt_as_policy else 'PG_combined_r_network.bin'
 gamma = .99
 learning_rate = .01
@@ -242,6 +241,7 @@ with open(fname, 'w') as outf:
                 prompt_encode = tokenizer.encode(prompt) 
                 ctxt = torch.tensor([prompt_encode + path['state']]).cuda()
                 action_logits = policy(ctxt, past=None)[0][0,len(prompt_encode)+1:,:]
+                action_logits = torch.softmax(action_logits)
             else:
                 states = path['state']
                 states = torch.cat(states).cuda()

@@ -2,6 +2,7 @@ from torch.nn.functional import softmax
 from transformers import BertForNextSentencePrediction, BertTokenizer
 
 def bert_seq(device, model, tokenizer, s1, s2):
+    ## check bert sentence max length, defaults to 512 but can be set to 1024
     encoded = tokenizer.encode_plus(s1, text_pair=s2, return_tensors='pt')
     seq_relationship_logits = model(**encoded)[0]
     probs = softmax(seq_relationship_logits, dim=1)

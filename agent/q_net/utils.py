@@ -98,25 +98,26 @@ def get_essay_samples1():
         sampled_essays.append((essay1, essay2))
     return df, essays, sampled_essays
 
-device = torch.device('cuda')
-tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-config = GPT2Config()
-config.output_hidden_states = True
-model = GPT2LMHeadModel.from_pretrained('gpt2', config=config)
-model.eval()
-model.to(device)
-model.cuda()
+if __name__=='__main__':
+    device = torch.device('cuda')
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    config = GPT2Config()
+    config.output_hidden_states = True
+    model = GPT2LMHeadModel.from_pretrained('gpt2', config=config)
+    model.eval()
+    model.to(device)
+    model.cuda()
 
-df, SAMPLES, SEQUENCES = get_essay_samples1()
-true_label = 1
-for (seq1, seq2) in SEQUENCES:
-    print('true', true_label)
-    r_score1 = evaluator(df, SAMPLES, model, tokenizer, seq1, device)
-    print(r_score1)
-    r_score2 = evaluator(df, SAMPLES, model, tokenizer, seq2, device)
-    print(r_score2)
-    print('====')
-    true_label += 1
+    df, SAMPLES, SEQUENCES = get_essay_samples1()
+    true_label = 1
+    for (seq1, seq2) in SEQUENCES:
+        print('true', true_label)
+        r_score1 = evaluator(df, SAMPLES, model, tokenizer, seq1, device)
+        print(r_score1)
+        r_score2 = evaluator(df, SAMPLES, model, tokenizer, seq2, device)
+        print(r_score2)
+        print('====')
+        true_label += 1
 
 #tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 #config = GPT2Config()
