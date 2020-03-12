@@ -14,11 +14,11 @@ import argparse
 from sequential import bert_seq
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpt_as_policy', action='store_true')
-parser.add_argument('--r_prob_scaler', default=20.)
-parser.add_argument('--r_tgt_word_scaler', default=1.)
-parser.add_argument('--r_simscore_scaler', default=.5)
-parser.add_argument('--r_seq_scaler', default=.5)
-parser.add_argument('--r_no_repeat_scaler', default=5.)
+parser.add_argument('--r_prob_scaler', default=10.)#20.)
+parser.add_argument('--r_tgt_word_scaler', default=0.)#1.)
+parser.add_argument('--r_simscore_scaler', default=0.)#.5)
+parser.add_argument('--r_seq_scaler', default=0.)#.5)
+parser.add_argument('--r_no_repeat_scaler', default=10.)#5.)
 cmd_args = parser.parse_args()
 
 # CONSTANTS
@@ -92,6 +92,14 @@ def get_returns(rewards):
         discount = [gamma ** t for t in range(len(r))]
         returns[i] = np.array(r) @ np.array(discount)
     return returns, cum_rewards, sent_length
+
+def repeats_ngram(generated):
+    gen_len = len(generated)
+    max_n = min(gen_len / 2, 10)
+    for n in range(max_n):
+        if generated[gen_len-n:] == generated[gen_len-2*n:gen_len-n]:
+            return True
+    return False
 
 def gen_episode(outf, epi, f, epoch, data):
     d = data.create_group('eps' + str(epi))
@@ -170,7 +178,7 @@ def gen_episode(outf, epi, f, epoch, data):
             length += 1
             context = token.unsqueeze(0)
             sequence = tokenizer.decode(generated)
-            r_no_repeat = -1. if token.item() == last_token else 0.
+            r_no_repeat = -1. if repeats_ngram(generated) else 0.
             last_token = token.item()
             r_tgt = 1. if token in target_words else 0.
             r_simscore = math.sqrt(abs((init_state[0] @ state[0]).item()))/768.0
@@ -241,7 +249,7 @@ with open(fname, 'w') as outf:
                 prompt_encode = tokenizer.encode(prompt) 
                 ctxt = torch.tensor([prompt_encode + path['state']]).cuda()
                 action_logits = policy(ctxt, past=None)[0][0,len(prompt_encode)+1:,:]
-                action_logits = torch.softmax(action_logits)
+                action_logits = torch.softmax(action_logits, -1)
             else:
                 states = path['state']
                 states = torch.cat(states).cuda()
