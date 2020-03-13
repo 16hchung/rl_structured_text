@@ -40,6 +40,7 @@ gamma = .99
 learning_rate = .01
 fname = 'GPTasPG_combined_r.txt' if cmd_args.gpt_as_policy else 'PG_combined_r.txt'
 MAX_LENGTH = 993 #1024-- GENERATED TEXT LIMITED TO 1024 BY THE GPT2 POSITIONAL ENCODINGS STRUCTURE
+TEMPERATURE = 2.
 FILEPATH = 'GPTasPG_combined_r' if cmd_args.gpt_as_policy else 'PG_combined_r'
 paths = []
 
@@ -96,7 +97,7 @@ def get_returns(rewards):
 def repeats_ngram(generated):
     gen_len = len(generated)
     max_n = min(gen_len / 2, 10)
-    for n in range(max_n):
+    for n in range(1, int(max_n)):
         if generated[gen_len-n:] == generated[gen_len-2*n:gen_len-n]:
             return True
     return False
@@ -157,7 +158,7 @@ def gen_episode(outf, epi, f, epoch, data):
             if cmd_args.gpt_as_policy:
                 # sample action from policy net output
                 action_logits, action_past, _ = policy(context, past=action_past)
-                action_probs = torch.softmax(action_logits, -1).squeeze(0).squeeze(0)
+                action_probs = torch.softmax(action_logits / TEMPERATURE, -1).squeeze(0).squeeze(0)
                 m = torch.distributions.Categorical(action_probs)
                 action = m.sample().item()
                 # get reward from model net
@@ -187,7 +188,7 @@ def gen_episode(outf, epi, f, epoch, data):
             tgt_reward = cmd_args.r_tgt_word_scaler * r_tgt
             prob_reward = cmd_args.r_prob_scaler * r_prob
             r_seq = 0.0
-            if tokenizer.decode(generated[-1]) in SENT_END_TOKENS:
+            if False and tokenizer.decode(generated[-1]) in SENT_END_TOKENS:
                 cur_sent = tokenizer.decode(cur_sent[:511])[:511]
                 if prev_sent is not None: 
                     r_seq = bert_seq(device, bert_model, bert_tokenizer, prev_sent, cur_sent)
@@ -219,9 +220,9 @@ def gen_episode(outf, epi, f, epoch, data):
             f['epoch' + str(epoch)]['eps' + str(epi)]['combined_reward'][-1] -= 1000
         if length >= MAX_LENGTH:
             outf.write(END_TOKEN)
-            path['reward'][-1] -= 100
-            f['epoch' + str(epoch)]['eps' + str(epi)]['final_reward'][0] -= 100
-            f['epoch' + str(epoch)]['eps' + str(epi)]['combined_reward'][-1] -= 100
+            path['reward'][-1] -= 1000
+            f['epoch' + str(epoch)]['eps' + str(epi)]['final_reward'][0] -= 1000
+            f['epoch' + str(epoch)]['eps' + str(epi)]['combined_reward'][-1] -= 1000
         paths.append(path)
         print('ep done')
 
@@ -249,7 +250,7 @@ with open(fname, 'w') as outf:
                 prompt_encode = tokenizer.encode(prompt) 
                 ctxt = torch.tensor([prompt_encode + path['state']]).cuda()
                 action_logits = policy(ctxt, past=None)[0][0,len(prompt_encode)+1:,:]
-                action_logits = torch.softmax(action_logits, -1)
+                action_logits = torch.softmax(action_logits / TEMPERATURE, -1)
             else:
                 states = path['state']
                 states = torch.cat(states).cuda()
@@ -280,7 +281,8 @@ with open(fname, 'w') as outf:
             length_np = np.array(length_arr)
             length_file = 'GPTasPG_combined_r_length.npy' if cmd_args.gpt_as_policy else 'PG_combined_r_length.npy'
             np.save(length_file, length_np)
-            print(last_sent)
+            if cmd_args.gpt_as_policy:
+                print(last_sent)
         print('Finished epoch!' + str(epoch))
     f.close()
     print('DONE')
