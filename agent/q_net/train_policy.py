@@ -18,7 +18,7 @@ parser.add_argument('--r_prob_scaler', default=10.)#20.)
 parser.add_argument('--r_tgt_word_scaler', default=0.)#1.)
 parser.add_argument('--r_simscore_scaler', default=0.)#.5)
 parser.add_argument('--r_seq_scaler', default=0.)#.5)
-parser.add_argument('--r_no_repeat_scaler', default=10.)#5.)
+parser.add_argument('--r_no_repeat_scaler', default=15.)#5.)
 cmd_args = parser.parse_args()
 
 # CONSTANTS
@@ -40,12 +40,15 @@ gamma = .99
 learning_rate = .01
 fname = 'GPTasPG_combined_r.txt' if cmd_args.gpt_as_policy else 'PG_combined_r.txt'
 MAX_LENGTH = 993 #1024-- GENERATED TEXT LIMITED TO 1024 BY THE GPT2 POSITIONAL ENCODINGS STRUCTURE
-TEMPERATURE = 2.
 FILEPATH = 'GPTasPG_combined_r' if cmd_args.gpt_as_policy else 'PG_combined_r'
 paths = []
+#temperature = 2.
+#temp_decay = .999
+temperature = 1.3
+temp_decay = .99985
 
 #device = torch.device("cuda" if args.cuda else "cpu")
-target_words = torch.load('target_words.pt').tolist()
+target_words = torch.load('target_words.pt').squeeze(-1).tolist()
 
 ''' GPT 2 GENERATING CODE '''
 device = torch.device('cuda')
@@ -69,6 +72,7 @@ if cmd_args.gpt_as_policy:
         param.requires_grad = False
     for param in policy.lm_head.parameters():
         param.requires_grad = True
+    policy.load_state_dict(torch.load('GPTasPG_combined_r_network.bin'))
 else:
     policy = Policy()
 policy.to(device)
@@ -79,6 +83,7 @@ policy.cuda()
 
 if cmd_args.gpt_as_policy:
     optimizer = torch.optim.AdamW(policy.lm_head.parameters(), lr=.0001)
+    optimizer.load_state_dict(torch.load('GPTasPG_combined_r_network.bin.optim'))
 else:
     optimizer = torch.optim.RMSprop(policy.parameters(), lr=learning_rate)
 
@@ -97,7 +102,7 @@ def get_returns(rewards):
 def repeats_ngram(generated):
     gen_len = len(generated)
     max_n = min(gen_len / 2, 10)
-    for n in range(1, int(max_n)):
+    for n in range(1, int(max_n)+1):
         if generated[gen_len-n:] == generated[gen_len-2*n:gen_len-n]:
             return True
     return False
@@ -158,7 +163,7 @@ def gen_episode(outf, epi, f, epoch, data):
             if cmd_args.gpt_as_policy:
                 # sample action from policy net output
                 action_logits, action_past, _ = policy(context, past=action_past)
-                action_probs = torch.softmax(action_logits / TEMPERATURE, -1).squeeze(0).squeeze(0)
+                action_probs = torch.softmax(action_logits / temperature, -1).squeeze(0).squeeze(0)
                 m = torch.distributions.Categorical(action_probs)
                 action = m.sample().item()
                 # get reward from model net
@@ -181,7 +186,7 @@ def gen_episode(outf, epi, f, epoch, data):
             sequence = tokenizer.decode(generated)
             r_no_repeat = -1. if repeats_ngram(generated) else 0.
             last_token = token.item()
-            r_tgt = 1. if token in target_words else 0.
+            r_tgt = 1. if last_token in target_words else 0.
             r_simscore = math.sqrt(abs((init_state[0] @ state[0]).item()))/768.0
             sim_reward = cmd_args.r_simscore_scaler * r_simscore
             no_repeat_reward = cmd_args.r_no_repeat_scaler * r_no_repeat
@@ -196,14 +201,17 @@ def gen_episode(outf, epi, f, epoch, data):
                 cur_sent = []
             seq_reward = cmd_args.r_seq_scaler * r_seq
             reward = prob_reward + tgt_reward + sim_reward + seq_reward + no_repeat_reward
-            f['epoch' + str(epoch)]['eps' + str(epi)]['state'][length+1] = tokenizer.decode(generated[-1])
-            f['epoch' + str(epoch)]['eps' + str(epi)]['emb_state'][length+1] = state.cpu()
-            f['epoch' + str(epoch)]['eps' + str(epi)]['scaled_reward_prob'][length] = prob_reward
-            f['epoch' + str(epoch)]['eps' + str(epi)]['scaled_reward_target'][length] = tgt_reward
-            f['epoch' + str(epoch)]['eps' + str(epi)]['scaled_reward_sim'][length] = sim_reward
-            f['epoch' + str(epoch)]['eps' + str(epi)]['combined_reward'][length] = reward
-            f['epoch' + str(epoch)]['eps' + str(epi)]['prob'][length] = r_prob
-            f['epoch' + str(epoch)]['eps' + str(epi)]['action'][length] = action
+            try:
+                f['epoch' + str(epoch)]['eps' + str(epi)]['state'][length+1] = tokenizer.decode(generated[-1])
+                f['epoch' + str(epoch)]['eps' + str(epi)]['emb_state'][length+1] = state.cpu()
+                f['epoch' + str(epoch)]['eps' + str(epi)]['scaled_reward_prob'][length] = prob_reward
+                f['epoch' + str(epoch)]['eps' + str(epi)]['scaled_reward_target'][length] = tgt_reward
+                f['epoch' + str(epoch)]['eps' + str(epi)]['scaled_reward_sim'][length] = sim_reward
+                f['epoch' + str(epoch)]['eps' + str(epi)]['combined_reward'][length] = reward
+                f['epoch' + str(epoch)]['eps' + str(epi)]['prob'][length] = r_prob
+                f['epoch' + str(epoch)]['eps' + str(epi)]['action'][length] = action
+            except:
+                print('hfd5 error')
             if not cmd_args.gpt_as_policy:
                 path['state'].append(state)
             path['action'].append(action)
@@ -250,7 +258,7 @@ with open(fname, 'w') as outf:
                 prompt_encode = tokenizer.encode(prompt) 
                 ctxt = torch.tensor([prompt_encode + path['state']]).cuda()
                 action_logits = policy(ctxt, past=None)[0][0,len(prompt_encode)+1:,:]
-                action_logits = torch.softmax(action_logits / TEMPERATURE, -1)
+                action_logits = torch.softmax(action_logits / temperature, -1)
             else:
                 states = path['state']
                 states = torch.cat(states).cuda()
@@ -266,6 +274,7 @@ with open(fname, 'w') as outf:
         if cmd_args.gpt_as_policy:
             last_sent = tokenizer.decode(paths[-1]['state'])
         paths = []
+        temperature = max(1., temperature*temp_decay)
         if epoch % LOG_FREQ == 0:
             if max_cum_loss < cum_loss:
                 torch.save(policy.state_dict() if cmd_args.gpt_as_policy else policy.model.state_dict(), SAVEPATH)
